@@ -1,0 +1,85 @@
+name: ESLint and Prettier Enforcer
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get changed files
+        id: changed-files
+
+        # Pin this to avoid supply chain attacks
+        # (see https://www.wiz.io/blog/github-action-tj-actions-changed-files-supply-chain-attack-cve-2025-30066)
+        uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46.0.5
+
+      - name: Fail PR if file is in ignored_files.json
+        shell: bash
+        run: |
+          # Get ignored_files.json content
+          IGNORE_LIST=$(jq -r '.files[]' eslint/ignored_files.json)
+          if [ -z "$IGNORE_LIST" ] || [ "$IGNORE_LIST" == "null" ] || [ "$IGNORE_LIST" == "[]" ]; then
+            echo "No ignored files found in eslint/ignored_files.json, skipping check."
+            exit 0
+          fi
+
+          # Get staged files
+          read -ra FILES <<< "${{ steps.changed-files.outputs.all_changed_files }}"
+
+          files_in_ignore_list=()
+          for f in "${FILES[@]}"; do
+            if echo "$IGNORE_LIST" | grep -qx "$f"; then
+              files_in_ignore_list+=("$f")
+            fi
+          done
+
+          for f in "${files_in_ignore_list[@]}"; do
+            echo "❌ File $f is in the ignored_files.json list. Please remove it from the list or fix the issues."
+          done
+
+          if [ ${#files_in_ignore_list[@]} -ne 0 ]; then
+            exit 1
+          fi
+
+          echo "✅ All changed files are not in the ignored_files.json list."
+          exit 0
+
+      - name: Run Prettier check on changed files
+        shell: bash
+        run: |
+          read -ra FILES <<< "${{ steps.changed-files.outputs.all_changed_files }}"
+
+          filtered_files=()
+          for f in "${FILES[@]}"; do
+            # Filter to only allow JS/TS/JSON/CSS/SCSS
+            if [[ "$f" == *.js || "$f" == *.jsx || "$f" == *.ts || "$f" == *.tsx || "$f" == *.json || "$f" == *.css || "$f" == *.scss ]]; then
+              filtered_files+=("$f")
+            fi
+          done
+
+          if [ "${#filtered_files[@]}" -gt 0 ]; then
+            if ! npx prettier --check "${filtered_files[@]}"; then
+              echo "❌ Some files are not formatted with Prettier."
+              exit 1
+            fi
+            echo "✅ All files conform to Prettier formatting."
+            exit 0
+          fi
+
+          echo "No relevant files changed, skipping Prettier check."
+          exit 0
