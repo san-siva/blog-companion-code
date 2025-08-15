@@ -11,8 +11,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🔗 Links
 
-Blog: santhoshsiva.dev
-GitHub: @san_siva
+Blog: santhoshsiva.dev  
 LinkedIn: [Santhosh Siva](https://www.linkedin.com/in/santhosh-siva-385ab018b/)
 
 ## ⭐ Support
