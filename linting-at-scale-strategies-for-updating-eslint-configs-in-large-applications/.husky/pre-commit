@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Function to detect Git operations
+detect_git_operation() {
+	if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+		echo "merge"
+		return 0
+	fi
+
+	if [ -d "$(git rev-parse --git-path rebase-merge)" ] ||
+		[ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+		echo "rebase"
+		return 0
+	fi
+
+	return 1
+}
+
+# Skip hooks if Git operation is in progress
+if operation=$(detect_git_operation); then
+	echo "\n\033[1;33mSkipping hooks: $operation operation detected.\033[0m\n"
+	exit 0
+fi
+
+echo "\n\033[1;34mChecking if staged file has been ignored from linting...\033[0m"
+./hooks/eslint_update_config.sh
+
+# ---------- lint-staged ----------
+echo "\n\033[0;34mPerforming lint-staged...\033[0m"
+npx lint-staged --config lint-staged.config.js
+LINT_STAGED_EXIT_CODE=$?
+
+# ---------- pre-commit ----------
+echo "\n\033[0;34mPerforming pre-commit...\033[0m"
+pre-commit run --hook-stage manual
+PRE_COMMIT_EXIT_CODE=$?
+
+# ---------- summary ----------
+if [[ $LINT_STAGED_EXIT_CODE -eq 0 && $PRE_COMMIT_EXIT_CODE -eq 0 ]]; then
+	echo "\n\033[1;32mCongratulations — all checks passed, you may sign your commit!\033[0m\n"
+	exit 0
+else
+	echo "\n\033[1;31mChecks failed — please fix the issues and try again.\033[0m\n"
+	exit 1
+fi

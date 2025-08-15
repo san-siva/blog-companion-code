@@ -1,0 +1,90 @@
+name: Eslint and Prettier enforcer
+
+on:
+    pull_request:
+
+permissions:
+    contents: read
+    packages: read
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Use Node 22.x
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22.x
+                  registry-url: https://npm.pkg.github.com
+                  scope: '@nexthink'
+
+            - name: Install dependencies
+              run: npm ci
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Get changed files
+              id: changed-files
+              uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46.0.5
+
+            - name: Fail PR if file is in ignored_files.json
+              shell: bash
+              run: |
+                # Get ignored_files.json content
+                IGNORE_LIST=$(jq -r '.files[]' eslint/ignored_files.json)
+                if [ -z "$IGNORE_LIST" ] || [ "$IGNORE_LIST" == "null" ] || [ "$IGNORE_LIST" == "[]" ]; then
+                  echo "No ignored files found in eslint/ignored_files.json, skipping check."
+                  exit 0
+                fi
+
+                # Get staged files
+                read -ra FILES <<< "${{ steps.changed-files.outputs.all_changed_files }}"
+
+                files_needed_to_be_not_ignored=()
+                for f in "${FILES[@]}"; do
+                  # If staged file is in the ignored_files.json list, add it to the files_needed_to_be_not_ignored array
+                  if echo "$IGNORE_LIST" | grep -qx "$f"; then
+                    files_needed_to_be_not_ignored+=("$f")
+                  fi
+                done
+
+                # Print the files that are in the ignored_files.json list
+                for f in "${files_needed_to_be_not_ignored[@]}"; do
+                  echo "❌ File $f is in the ignored_files.json list. Please remove it from the list or fix the issues."
+                done
+
+                # If there are any files that are in the ignored_files.json list, fail the job
+                if [ ${#files_needed_to_be_not_ignored[@]} -ne 0 ]; then
+                  exit 1
+                fi
+
+                echo "✅ All changed files are not in the ignored_files.json list."
+                exit 0
+
+            - name: Run Prettier check on changed files
+              shell: bash
+              run: |
+                  read -ra FILES <<< "${{ steps.changed-files.outputs.all_changed_files }}"
+
+                  filtered_files=()
+                  for f in "${FILES[@]}"; do
+                    # Filter out files that are not JavaScript or TypeScript or JSON or CSS/SCSS
+                    if [[ "$f" == *.js || "$f" == *.jsx || "$f" == *.ts || "$f" == *.tsx || "$f" == *.json || "$f" == *.csss || "$f" == *.scss ]]; then
+                      filtered_files+=("$f")
+                    fi
+                  done
+
+                  # Run Prettier only if matching files exist
+                  if [ "${#filtered_files[@]}" -gt 0 ]; then
+                    if ! npx prettier --check "${filtered_files[@]}"; then
+                      echo "❌ Some files are not formatted with Prettier."
+                      exit 1
+                    fi
+                    echo "✅ All files conform to Prettier formatting."
+                    exit 0
+                  fi
+
+                  echo "No JavaScript/TypeScript files changed, skipping Prettier check."
+                  exit 0
